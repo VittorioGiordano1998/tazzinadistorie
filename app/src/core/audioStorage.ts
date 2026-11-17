@@ -8,6 +8,8 @@ import { supabase } from './supabase'
 export interface AudioStorage {
   /** Stores `data` at `path` (a new object: it never overwrites). */
   upload(path: string, data: Blob, mime: string): Promise<void>
+  /** The stored audio itself (used to transcribe it on the device). */
+  download(path: string): Promise<Blob>
   /** Removes objects; missing ones are ignored. */
   remove(paths: string[]): Promise<void>
   /** A time-limited URL an `<audio>` element can play from. */
@@ -34,6 +36,11 @@ function createSupabaseAudioStorage(): AudioStorage {
         }
         throw new Error(error.message)
       }
+    },
+    async download(path) {
+      const { data, error } = await bucket().download(path)
+      if (error || !data) throw new Error(error?.message ?? 'Audio non disponibile.')
+      return data
     },
     async remove(paths) {
       if (paths.length === 0) return

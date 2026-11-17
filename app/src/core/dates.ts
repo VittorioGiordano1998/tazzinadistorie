@@ -28,3 +28,13 @@ export function formatDuration(totalSeconds: number | null | undefined): string 
 export function defaultStoryTitle(iso: string): string {
   return `Storia del ${formatLongDate(iso)}`
 }
+
+/** Seconds -> `m:ss.d` (a tenth of a second), for sentence start times. */
+export function formatTimestamp(totalSeconds: number | null | undefined): string {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00.0'
+  const tenths = Math.floor(totalSeconds * 10 + 1e-9)
+  const whole = Math.floor(tenths / 10)
+  const minutes = Math.floor(whole / 60)
+  const seconds = String(whole % 60).padStart(2, '0')
+  return `${minutes}:${seconds}.${tenths % 10}`
+}
