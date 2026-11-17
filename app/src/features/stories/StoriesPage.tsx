@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 
 import { formatDuration, formatLongDate } from '../../core/dates'
@@ -5,11 +6,22 @@ import { AudioPlayer } from '../../ui/AudioPlayer'
 import { Card, EmptyState, ErrorBanner, PageHeader, Spinner } from '../../ui/components'
 import { CupIcon, MicIcon } from '../../ui/icons'
 import { useDiary } from '../diary/DiaryProvider'
+import { TranscribeControl } from '../transcription/TranscribeControl'
+import { useTranscription } from '../transcription/TranscriptionProvider'
 import { useStories } from './useStories'
 
 export function StoriesPage() {
   const { diary, canRecord } = useDiary()
-  const { stories, loading, error, audioUrl } = useStories()
+  const { stories, loading, error, audioUrl, refresh } = useStories()
+  const { jobs, finishedCount } = useTranscription()
+
+  // A draft finished in the background: bring the list up to date.
+  const seenFinished = useRef(finishedCount)
+  useEffect(() => {
+    if (seenFinished.current === finishedCount) return
+    seenFinished.current = finishedCount
+    void refresh()
+  }, [finishedCount, refresh])
 
   return (
     <div className="page-enter space-y-5 pb-28">
@@ -73,6 +85,9 @@ export function StoriesPage() {
                   knownDuration={story.durationSeconds}
                   resolveSrc={() => audioUrl(story)}
                 />
+                {canRecord && (!(story.textDialect || story.textItalian) || jobs[story.id]) && (
+                  <TranscribeControl story={story} />
+                )}
               </Card>
             </li>
           ))}

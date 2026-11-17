@@ -9,6 +9,7 @@ import { isSupabaseConfigured } from './core/env'
 import { SetupScreen } from './core/SetupScreen'
 import { AuthProvider } from './features/auth/AuthProvider'
 import { DiaryProvider } from './features/diary/DiaryProvider'
+import { TranscriptionProvider } from './features/transcription/TranscriptionProvider'
 import { ToastProvider } from './ui/toast'
 
 const rootEl = document.getElementById('root')
@@ -25,9 +26,11 @@ createRoot(rootEl).render(
       <AuthProvider>
         <DiaryProvider>
           <ToastProvider>
-            <ErrorBoundary fullPage>
-              <AppRouter />
-            </ErrorBoundary>
+            <TranscriptionProvider>
+              <ErrorBoundary fullPage>
+                <AppRouter />
+              </ErrorBoundary>
+            </TranscriptionProvider>
           </ToastProvider>
         </DiaryProvider>
       </AuthProvider>
