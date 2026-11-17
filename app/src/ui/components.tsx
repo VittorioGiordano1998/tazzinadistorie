@@ -1,9 +1,4 @@
-import type {
-  ButtonHTMLAttributes,
-  InputHTMLAttributes,
-  ReactNode,
-  TextareaHTMLAttributes,
-} from 'react'
+import type { ButtonHTMLAttributes, ComponentProps, InputHTMLAttributes, ReactNode } from 'react'
 
 export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
   return (
@@ -73,11 +68,8 @@ export function TextInput({ className = '', ...rest }: InputHTMLAttributes<HTMLI
   return <input {...rest} className={`${FIELD_CLASS} ${className}`} />
 }
 
-export function TextArea({
-  className = '',
-  ...rest
-}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...rest} className={`${FIELD_CLASS} min-h-48 resize-y leading-relaxed ${className}`} />
+export function TextArea({ className = '', ...rest }: ComponentProps<'textarea'>) {
+  return <textarea {...rest} className={`${FIELD_CLASS} min-h-24 resize-y leading-relaxed ${className}`} />
 }
 
 export function Field({
