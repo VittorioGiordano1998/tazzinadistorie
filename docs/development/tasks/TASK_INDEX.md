@@ -2,7 +2,7 @@
 
 This folder holds one Markdown record per task, each in the subfolder matching its status; new records are created from `TASK_TEMPLATE.md` and move subfolders on every status change.
 
-2 tasks — 0 Proposed · 0 Ready · 0 In Progress · 0 Blocked · 2 Done · 0 Cancelled
+3 tasks — 0 Proposed · 0 Ready · 1 In Progress · 0 Blocked · 2 Done · 0 Cancelled
 
 ## Proposed
 
@@ -18,6 +18,7 @@ This folder holds one Markdown record per task, each in the subfolder matching i
 
 | ID | Task | Type | Area | Severity | Opened | Done |
 | --- | --- | --- | --- | --- | --- | --- |
+| [TASK-APP-VITTORIOGIORDANOYBQ-003](in-progress/TASK-APP-VITTORIOGIORDANOYBQ-003-sentence-editor-timestamps-and-optional-draft-transcription.md) | Sentence editor, timestamps and optional draft transcription | Feature | app | Medium | 2026-11-17 | — |
 
 ## Blocked
 
