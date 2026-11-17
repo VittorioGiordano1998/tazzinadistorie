@@ -36,6 +36,24 @@ npm run lint     # oxlint
 npm run test     # vitest
 ```
 
+### Frasi e bozza di trascrizione
+
+Ogni storia si corregge frase per frase: il tempo di una frase è un pulsante (tocca per riascoltare
+da lì), "Nuova frase qui" aggiunge una frase al punto in cui sei nell'audio. Servono le migrazioni
+`20261117150000_tazzina_story_texts.sql` e `20261118090000_tazzina_story_segments.sql`.
+
+La **bozza automatica è facoltativa e spenta di default**. Si accende in `app/.env.local`:
+
+```sh
+VITE_TRANSCRIPTION=browser-whisper   # oppure "mock" per provare le schermate senza modello
+VITE_TRANSCRIPTION_MODEL=Xenova/whisper-base   # facoltativo: whisper-tiny (leggero) o whisper-small (più preciso, più lento)
+```
+
+Con `browser-whisper` il modello gira nel browser (gratis, l'audio non esce dal dispositivo): la
+prima volta scarica il modello, e dal telefono è lento, meglio dal computer. Il servizio sta dietro
+l'interfaccia `TranscriptionProvider` (`app/src/core/transcription.ts`): per cambiarlo basta un'altra
+implementazione.
+
 ### Provare la registrazione dal telefono
 
 Il microfono funziona solo in contesto sicuro: `http://localhost` sul PC va bene, ma dal telefono
