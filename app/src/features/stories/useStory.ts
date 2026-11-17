@@ -2,45 +2,51 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { audioStorage } from '../../core/audioStorage'
 import { supabase } from '../../core/supabase'
+import type { Segment } from './segmentModel'
+import { fetchSegments, replaceSegments } from './segmentsApi'
 import { rowToStory, STORY_COLUMNS } from './storyModel'
 import type { Story, StoryRow } from './storyModel'
-import { toStoredText } from './storyText'
 
 /**
- * One story (state layer): loading it and saving its two text fields.
- * The save is optimistic-lock safe: it only applies if the row is still at the
- * `updated_at` it was loaded with, so a change made elsewhere is never overwritten.
+ * One story (state layer): the story, its sentences, and saving them.
+ * Saving is lock-safe: it only applies if the story is still at the `updated_at` it was
+ * loaded with, so a change made elsewhere is never overwritten.
  */
 
-export interface StoryTexts {
-  textDialect: string
-  textItalian: string
-}
-
-export type SaveTextsResult = 'saved' | 'conflict'
+export type SaveSegmentsResult = 'saved' | 'conflict'
 
 export function useStory(storyId: string | undefined) {
   const [story, setStory] = useState<Story | null>(null)
+  const [segments, setSegments] = useState<Segment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!storyId) {
       setStory(null)
+      setSegments([])
       setLoading(false)
       return
     }
     setLoading(true)
-    const { data, error: loadError } = await supabase
-      .from('stories')
-      .select(STORY_COLUMNS)
-      .eq('id', storyId)
-      .maybeSingle()
-    if (loadError) {
-      setError(loadError.message)
-    } else {
-      setStory(data ? rowToStory(data as unknown as StoryRow) : null)
+    try {
+      const { data, error: loadError } = await supabase
+        .from('stories')
+        .select(STORY_COLUMNS)
+        .eq('id', storyId)
+        .maybeSingle()
+      if (loadError) throw new Error(loadError.message)
+      if (!data) {
+        setStory(null)
+        setSegments([])
+      } else {
+        const loaded = rowToStory(data as unknown as StoryRow)
+        setSegments(await fetchSegments(loaded.id))
+        setStory(loaded)
+      }
       setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Caricamento non riuscito.')
     }
     setLoading(false)
   }, [storyId])
@@ -49,33 +55,27 @@ export function useStory(storyId: string | undefined) {
     void load()
   }, [load])
 
-  /** Saves both texts. `conflict` means the story changed elsewhere: reload before retrying. */
-  const saveTexts = useCallback(
-    async (texts: StoryTexts): Promise<SaveTextsResult> => {
+  /** Saves all the sentences. `conflict` means the story changed elsewhere: reload before retrying. */
+  const saveSegments = useCallback(
+    async (next: ReadonlyArray<Segment>): Promise<SaveSegmentsResult> => {
       if (!story) throw new Error('Storia non caricata.')
-      const { data, error: updateError } = await supabase
-        .from('stories')
-        .update({
-          text_dialect: toStoredText(texts.textDialect),
-          text_italian: toStoredText(texts.textItalian),
-        })
-        .eq('id', story.id)
-        .eq('updated_at', story.updatedAt)
-        .select(STORY_COLUMNS)
-        .maybeSingle()
-      if (updateError) throw new Error(updateError.message)
-      if (!data) return 'conflict'
-      setStory(rowToStory(data as unknown as StoryRow))
+      const result = await replaceSegments(story.id, story.updatedAt, next)
+      if (!result.ok) return 'conflict'
+      await load()
       return 'saved'
     },
-    [story],
+    [story, load],
   )
 
-  /** A playable URL for the story's audio. */
+  /**
+   * A playable URL for the story's audio. It depends only on the audio path, so saving
+   * the sentences (which reloads the story) does not change it and restart the playback.
+   */
+  const audioPath = story?.audioPath
   const audioUrl = useCallback(() => {
-    if (!story) return Promise.reject(new Error('Storia non caricata.'))
-    return audioStorage.signedUrl(story.audioPath)
-  }, [story])
+    if (!audioPath) return Promise.reject(new Error('Storia non caricata.'))
+    return audioStorage.signedUrl(audioPath)
+  }, [audioPath])
 
-  return { story, loading, error, reload: load, saveTexts, audioUrl }
+  return { story, segments, loading, error, reload: load, saveSegments, audioUrl }
 }

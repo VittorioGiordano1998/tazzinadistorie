@@ -1,52 +1,84 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { formatDuration, formatLongDate } from '../../core/dates'
 import { AudioPlayer } from '../../ui/AudioPlayer'
-import {
-  Button,
-  Card,
-  EmptyState,
-  ErrorBanner,
-  Field,
-  Spinner,
-  TextArea,
-} from '../../ui/components'
+import type { AudioPlayerHandle } from '../../ui/AudioPlayer'
+import { Button, Card, EmptyState, ErrorBanner, Spinner } from '../../ui/components'
 import { ChevronLeftIcon } from '../../ui/icons'
 import { useToast } from '../../ui/toast'
 import { useDiary } from '../diary/DiaryProvider'
-import { MAX_STORY_TEXT_LENGTH, sameStoredText } from './storyText'
+import { TranscribeControl } from '../transcription/TranscribeControl'
+import { useTranscription } from '../transcription/TranscriptionProvider'
+import { SegmentCard } from './SegmentCard'
+import {
+  activeSegmentIndex,
+  newSegment,
+  roundTime,
+  segmentsEqual,
+  sortSegments,
+} from './segmentModel'
+import type { Segment } from './segmentModel'
 import { useStory } from './useStory'
 
 /**
- * A story: the player stays pinned on top while the two optional texts are written
- * below it, so the recording can be paused and replayed without scrolling.
+ * A story, sentence by sentence. The player stays pinned on top so the recording can be
+ * paused, replayed and marked ("a new sentence starts here") while typing below it.
+ * Touching a sentence's time plays the audio from that point.
  */
 export function StoryPage() {
   const { id } = useParams()
   const { canRecord } = useDiary()
   const { showToast } = useToast()
-  const { story, loading, error, reload, saveTexts, audioUrl } = useStory(id)
+  const { finishedCount } = useTranscription()
+  const { story, segments, loading, error, reload, saveSegments, audioUrl } = useStory(id)
 
-  const [textDialect, setTextDialect] = useState('')
-  const [textItalian, setTextItalian] = useState('')
+  const player = useRef<AudioPlayerHandle | null>(null)
+  const [audioSrc, setAudioSrc] = useState<string | undefined>(undefined)
+  const [time, setTime] = useState(0)
+  const [edited, setEdited] = useState<Segment[]>([])
+  const [focusKey, setFocusKey] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
 
-  // Fields follow the stored story whenever it is (re)loaded or saved.
+  // The audio URL is resolved up front: a tap on a sentence must play at once.
   const storyId = story?.id
-  const storedDialect = story?.textDialect
-  const storedItalian = story?.textItalian
   useEffect(() => {
-    setTextDialect(storedDialect ?? '')
-    setTextItalian(storedItalian ?? '')
-  }, [storyId, storedDialect, storedItalian])
+    if (!storyId) return
+    let active = true
+    void audioUrl()
+      .then((url) => {
+        if (active) setAudioSrc(url)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [storyId, audioUrl])
 
-  const dirty =
-    story !== null &&
-    (!sameStoredText(textDialect, story.textDialect) || !sameStoredText(textItalian, story.textItalian))
+  // The editor follows the stored sentences whenever they are (re)loaded.
+  useEffect(() => {
+    setEdited(segments)
+  }, [segments])
+
+  const dirty = !segmentsEqual(edited, segments)
+
+  // Event handlers read the latest sentences from here, so they can stay stable.
+  const editedRef = useRef(edited)
+  useEffect(() => {
+    editedRef.current = edited
+  }, [edited])
+
+  // A draft finished elsewhere (the list, a queued job): show it, unless there is
+  // unsaved work here that a reload would throw away.
+  const seenFinished = useRef(finishedCount)
+  useEffect(() => {
+    if (seenFinished.current === finishedCount) return
+    seenFinished.current = finishedCount
+    if (!dirty) void reload()
+  }, [finishedCount, dirty, reload])
 
   // Unsaved words are lost on reload or close: ask first.
   useEffect(() => {
@@ -58,14 +90,58 @@ export function StoryPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
 
+  const active = useMemo(() => activeSegmentIndex(edited, time), [edited, time])
+
+  const handlePlay = useCallback((key: string) => {
+    const target = editedRef.current.find((segment) => segment.key === key)
+    if (target) player.current?.seekTo(target.start)
+  }, [])
+
+  const handleChange = useCallback(
+    (key: string, patch: Partial<Pick<Segment, 'textDialect' | 'textItalian'>>) => {
+      setEdited((current) =>
+        current.map((segment) =>
+          // Any human edit turns a draft into a corrected sentence.
+          segment.key === key ? { ...segment, ...patch, source: 'manual' } : segment,
+        ),
+      )
+    },
+    [],
+  )
+
+  const handleSetStartHere = useCallback((key: string) => {
+    const now = roundTime(player.current?.currentTime() ?? 0)
+    setEdited((current) =>
+      sortSegments(
+        current.map((segment) => (segment.key === key ? { ...segment, start: now } : segment)),
+      ),
+    )
+  }, [])
+
+  const handleRemove = useCallback((key: string) => {
+    setEdited((current) => current.filter((segment) => segment.key !== key))
+  }, [])
+
+  function handleAddHere() {
+    const now = roundTime(player.current?.currentTime() ?? 0)
+    const existing = edited.find((segment) => segment.start === now)
+    if (existing) {
+      setFocusKey(existing.key)
+      return
+    }
+    const created = newSegment(now)
+    setEdited((current) => sortSegments([...current, created]))
+    setFocusKey(created.key)
+  }
+
   async function handleSave(event: FormEvent) {
     event.preventDefault()
     setSaveError(null)
     setSaving(true)
     try {
-      const outcome = await saveTexts({ textDialect, textItalian })
+      const outcome = await saveSegments(edited)
       if (outcome === 'conflict') setConflict(true)
-      else showToast('Testi salvati.')
+      else showToast('Frasi salvate.')
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Salvataggio non riuscito.')
     } finally {
@@ -110,7 +186,7 @@ export function StoryPage() {
   }
 
   return (
-    <form onSubmit={handleSave} className="page-enter space-y-5 pb-24">
+    <form onSubmit={handleSave} className="page-enter space-y-5 pb-28">
       {back}
 
       <header className="space-y-1">
@@ -124,13 +200,21 @@ export function StoryPage() {
       </header>
 
       {/* Pinned under the app header (about 3.8rem tall). */}
-      <div className="sticky top-[3.8rem] z-20 -mx-4 bg-canvas/95 px-4 py-2 backdrop-blur">
-        <Card>
+      <div className="sticky top-[3.8rem] z-20 -mx-4 space-y-2 bg-canvas/95 px-4 py-2 backdrop-blur">
+        <Card className="space-y-3">
           <AudioPlayer
             label={story.title}
             knownDuration={story.durationSeconds}
+            src={audioSrc}
             resolveSrc={audioUrl}
+            handleRef={player}
+            onTime={setTime}
           />
+          {canRecord && (
+            <Button type="button" variant="secondary" size="sm" onClick={handleAddHere}>
+              Nuova frase qui
+            </Button>
+          )}
         </Card>
       </div>
 
@@ -147,39 +231,37 @@ export function StoryPage() {
         </div>
       )}
 
-      <Field
-        label="Testo in dialetto"
-        hint={
-          canRecord
-            ? 'Scrivilo come lo senti. Facoltativo.'
-            : undefined
-        }
-      >
-        <TextArea
-          value={textDialect}
-          onChange={(event) => setTextDialect(event.target.value)}
-          readOnly={!canRecord}
-          lang="nap"
-          // Italian spellcheck would underline every Neapolitan word.
-          spellCheck={false}
-          autoCapitalize="sentences"
-          maxLength={MAX_STORY_TEXT_LENGTH}
-          placeholder={canRecord ? 'Scrivi qui il racconto in dialetto…' : 'Nessun testo in dialetto.'}
-        />
-      </Field>
-
-      <Field label="Traduzione in italiano" hint={canRecord ? 'Facoltativa.' : undefined}>
-        <TextArea
-          value={textItalian}
-          onChange={(event) => setTextItalian(event.target.value)}
-          readOnly={!canRecord}
-          lang="it"
-          spellCheck
-          autoCapitalize="sentences"
-          maxLength={MAX_STORY_TEXT_LENGTH}
-          placeholder={canRecord ? 'Scrivi qui la traduzione…' : 'Nessuna traduzione.'}
-        />
-      </Field>
+      {edited.length === 0 ? (
+        <div className="space-y-4 rounded-2xl border border-dashed border-line-strong bg-surface/50 px-5 py-8 text-center">
+          <p className="font-display text-lg font-semibold text-ink">Ancora nessuna frase</p>
+          <p className="mx-auto max-w-xs text-pretty text-sm text-ink-muted">
+            {canRecord
+              ? 'Ascolta il racconto e premi “Nuova frase qui” ogni volta che ne inizia una: poi scrivi sotto cosa dice.'
+              : 'Quando verranno scritte, le frasi compariranno qui.'}
+          </p>
+          {canRecord && (
+            <div className="flex flex-col items-center gap-2">
+              <TranscribeControl story={story} showNote />
+            </div>
+          )}
+        </div>
+      ) : (
+        <ul className="space-y-3">
+          {edited.map((segment, index) => (
+            <SegmentCard
+              key={segment.key}
+              segment={segment}
+              active={index === active}
+              canEdit={canRecord}
+              focusRequested={segment.key === focusKey}
+              onPlay={handlePlay}
+              onChange={handleChange}
+              onSetStartHere={handleSetStartHere}
+              onRemove={handleRemove}
+            />
+          ))}
+        </ul>
+      )}
 
       {saveError && <ErrorBanner message={saveError} />}
 
@@ -191,7 +273,7 @@ export function StoryPage() {
             disabled={!dirty}
             className="pointer-events-auto w-full max-w-xs py-3.5"
           >
-            {dirty ? 'Salva i testi' : 'Tutto salvato'}
+            {dirty ? 'Salva le frasi' : 'Tutto salvato'}
           </Button>
         </div>
       )}
